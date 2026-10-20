@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <link rel="icon" href="/favicon.png" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+        <title>GD Place</title>
+        <meta content="GD Place" property="og:title" />
+        <meta content="A place where everyone in the community builds a level together" property="og:description" />
+        <!-- black browser address bar / status bar -->
+        <meta name="theme-color" content="#000000" />
+        <meta name="msapplication-navbutton-color" content="#000000" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+        <meta name="color-scheme" content="dark" />
+        <meta name="twitter:card" content="summary_large_image" />
+
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link href="https://fonts.googleapis.com/css2?family=Cabin&display=swap" rel="stylesheet" />
+        <link href="https://fonts.googleapis.com/css?family=Archivo+Black&display=swap" rel="stylesheet" />
+        <link rel="preload" href="/chatFont.otf" as="font" type="font/otf" crossorigin />
+        <link rel="preload" href="/ui/loadingCircle.png" as="image" />
+
+        <style>
+            html,
+            body {
+                margin: 0;
+                background: #000;
+            }
+            @keyframes boot_spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+            /* static boot screen: same look as src/ui/LoadingScreen.svelte */
+            #boot_loader {
+                position: fixed;
+                inset: 0;
+                z-index: 8999;
+                background: #000;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 14px;
+            }
+            #boot_loader img {
+                width: 72px;
+                height: 72px;
+                animation: boot_spin 0.9s linear infinite;
+            }
+            #boot_loader .boot_gold {
+                position: relative;
+                margin-top: 18px; /* move text down a bit */
+                font: 32px/1.15 Pusab, Cabin, sans-serif;
+            }
+            #boot_loader .boot_gold::before {
+                content: attr(data-text);
+                position: absolute;
+                inset: 0;
+                color: #000;
+                -webkit-text-stroke: 0.2em #000;
+                text-shadow: 0 0.07em 0 rgba(0, 0, 0, 0.55);
+            }
+            #boot_loader .boot_gold span {
+                position: relative;
+                padding: 0.3em 0.12em;
+                margin: -0.3em -0.12em;
+                background-image: linear-gradient(180deg, #fff25a 0, #fff25a 0.3em, #f99a0c calc(100% - 0.3em), #f99a0c 100%);
+                -webkit-background-clip: text;
+                background-clip: text;
+                -webkit-text-fill-color: transparent;
+                color: transparent;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="boot_loader">
+            <img src="/ui/loadingCircle.png" alt="" draggable="false" />
+            <div class="boot_gold" data-text="Loading 0%"><span>Loading 0%</span></div>
+        </div>
+        <div id="app"></div>
+        <script type="module" src="/src/main.ts"></script>
+    </body>
+</html>

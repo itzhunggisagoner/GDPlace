@@ -1,0 +1,43 @@
+{
+  "name": "gdplace",
+  "main": "worker/index.js",
+  "compatibility_date": "2025-01-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "gdplace",
+      "database_id": "bd76142d-a48f-447e-8698-507d52b478bb"
+    }
+  ],
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "persist": true
+    },
+    "traces": {
+      "enabled": false,
+      "head_sampling_rate": 1,
+      "persist": true
+    },
+    "issue_detection": {
+      "enabled": false
+    }
+  },
+  "ratelimits": [
+    { "name": "LOGIN_LIMITER", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } }
+  ],
+  "vars": {
+    "ADMIN_USERS": "hunggisagoner",
+    "PLACE_TIMER": "300",
+    "DELETE_TIMER": "300",
+    "CHUNK_OBJECT_LIMIT": "1500",
+    "GD_SERVER": "https://www.boomlings.com/database"
+  }
+}
