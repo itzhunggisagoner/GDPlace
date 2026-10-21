@@ -1849,8 +1849,9 @@
     }
     .tabs .obj_tab_button {
         flex: 0 0 auto;
-        width: calc(var(--grid-button-size) * 0.85);
-        height: calc(var(--grid-button-size) * 0.85);
+        /* exactly half of an object cell (cell = grid-button-size * 0.94), same size selected or not */
+        width: calc(var(--grid-button-size) * 0.94 / 2);
+        height: calc(var(--grid-button-size) * 0.94 / 2);
         /* no size change / transition between selected and unselected: nothing moves or bounces */
         transition: none;
         transform: none !important;
