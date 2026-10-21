@@ -454,22 +454,6 @@ export class EditorNode extends PIXI.Container {
         groundLine.anchor.set(0.5, 1)
         this.addChild(groundLine)
 
-        // invisible mask before level bounds
-        const mask = new PIXI.Graphics()
-        mask.beginFill(0xff0000)
-        mask.drawRect(
-            // -100,
-            // -100,
-            // 200,
-            // 200
-            LEVEL_BOUNDS.start.x,
-            LEVEL_BOUNDS.end.y - 10,
-            LEVEL_BOUNDS.end.x - LEVEL_BOUNDS.start.x,
-            LEVEL_BOUNDS.start.y - LEVEL_BOUNDS.end.y
-        )
-        mask.endFill()
-        this.addChild(mask)
-
         // ground and its line are not limited to the build area
 
         this.layerGroup = new PIXI_LAYERS.Group(0, true)
