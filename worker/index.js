@@ -552,6 +552,11 @@ async function admin(req, env) {
       else await env.DB.prepare("INSERT INTO settings(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(b.key, String(v)).run();
       return json({ ok: true });
     }
+    case "exportLevel": {
+      // every object of the level (for the .gmd export)
+      const { results } = await env.DB.prepare("SELECT data FROM objects ORDER BY id").all();
+      return json({ objects: results.map((r) => r.data) });
+    }
     case "reloadAll": {
       // every open page notices the new id on its next state refresh and reloads (keeping its progress)
       await env.DB.prepare("INSERT INTO settings(k,v) VALUES('reloadId',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(String(Date.now())).run();
