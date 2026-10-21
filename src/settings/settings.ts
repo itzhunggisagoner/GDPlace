@@ -36,13 +36,6 @@ const DEAFULT_SETTINGS = {
         enabled: false,
         label: "Hide selection outline",
     },
-    showBuildBox: {
-        enabled: true,
-        label: "Show build area box",
-        cb: () => {
-            pixiApp?.editorNode?.redrawAreaBox()
-        },
-    },
     hideDecoObjects: {
         enabled: false,
         label: "Hide decoration objects",
