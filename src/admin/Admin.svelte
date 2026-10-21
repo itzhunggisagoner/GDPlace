@@ -15,6 +15,7 @@
     import GDText from "../ui/GDText.svelte"
     import GDButton from "../ui/GDButton.svelte"
     import FramePanel from "../ui/FramePanel.svelte"
+    import { exportGmd } from "../editor/exportGmd"
 
     let open = false
 
@@ -85,6 +86,19 @@
         syncFromServer() // instant, from what the page already has
         await refreshState() // then the freshest values
         syncFromServer()
+    }
+
+    let exporting = false
+    async function doExport() {
+        if (exporting) return
+        exporting = true
+        try {
+            const n = await exportGmd()
+            toast.push(`Exported ${n} objects to gdplace.gmd`, toastSuccessTheme)
+        } catch (err) {
+            toast.push(`Export failed! (${err?.message ?? "error"})`, toastErrorTheme)
+        }
+        exporting = false
     }
 
     async function call(body: any, okMsg: string) {
@@ -299,6 +313,15 @@
                                     )
                                         call({ action: "reloadAll" }, "Reload sent to everyone")
                                 }}
+                            />
+                        </div>
+                        <div class="btns">
+                            <GDButton
+                                color="green"
+                                label={exporting ? "Exporting..." : "Export level (.gmd)"}
+                                disabled={exporting}
+                                textSize={22}
+                                on:click={doExport}
                             />
                         </div>
                         <div class="field">
