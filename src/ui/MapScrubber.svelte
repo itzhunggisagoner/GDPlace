@@ -80,29 +80,21 @@
 
 <style>
     .scrubber {
-        --h: 32px;
+        /* 24px on desktop, 18px on phones (--ui-zoom is 0.75 there) */
+        --h: calc(24px * var(--ui-zoom, 1));
         position: absolute;
-        top: calc(var(--corner-gap) + var(--corner-size) / 2 - var(--h) / 2);
+        /* own row under the corner buttons so the move button never covers them */
+        top: calc(var(--corner-gap) * 2 + var(--corner-size) + var(--h));
         left: 50%;
         transform: translateX(-50%);
-        width: min(440px, 44vw);
-        min-width: 140px;
+        /* leaves room for the move button sticking out at both ends */
+        width: min(420px, calc(100vw - var(--h) * 4));
         height: var(--h);
         z-index: 25;
         touch-action: none;
         user-select: none;
         -webkit-user-select: none;
         cursor: pointer;
-    }
-    /* phones / narrow screens: own row under the corner buttons, with room for the
-       button (1.9 x height) to stick out at both ends without being covered */
-    @media (max-width: 900px), (orientation: portrait) {
-        .scrubber {
-            top: calc(var(--corner-gap) * 2 + var(--corner-size) + var(--h) * 0.5);
-            width: calc(100vw - var(--h) * 3);
-            max-width: 560px;
-            min-width: 0;
-        }
     }
 
     /* groove drawn in 3 parts: left cap | stretchable middle | right cap (sprite is 420x32, caps ~13px) */
