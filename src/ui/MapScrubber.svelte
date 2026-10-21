@@ -83,8 +83,9 @@
         /* 24px on desktop, 18px on phones (--ui-zoom is 0.75 there) */
         --h: calc(24px * var(--ui-zoom, 1));
         position: absolute;
-        /* own row under the corner buttons so the move button never covers them */
-        top: calc(var(--corner-gap) * 2 + var(--corner-size) + var(--h));
+        /* own row below the two rows of corner buttons (playbutton / settings, then admin),
+           so the move button never sits behind any of them */
+        top: calc(var(--corner-gap) * 3 + var(--corner-size) * 2 + var(--h));
         left: 50%;
         transform: translateX(-50%);
         /* leaves room for the move button sticking out at both ends */
