@@ -93,7 +93,6 @@ export class EditorNode extends PIXI.Container {
     public selectableWorld: PIXI.Container
     public groundTiling: PIXI.TilingSprite
     public gridGraph: PIXI.Graphics
-    public areaBox: PIXI.Graphics
 
     public tooltip: TooltipNode
 
@@ -102,22 +101,6 @@ export class EditorNode extends PIXI.Container {
     public visibleChunks: Set<string> = new Set()
     toggleGround() {
         this.groundTiling.visible = !settings.hideGround.enabled
-    }
-    // coloured box covering the whole buildable area (Settings > Build area box)
-    redrawAreaBox() {
-        if (!this.areaBox) return
-        this.areaBox.clear()
-        const on = settings.showBuildBox?.enabled ?? true
-        this.areaBox.visible = on
-        if (!on) return
-        const w = LEVEL_BOUNDS.end.x - LEVEL_BOUNDS.start.x
-        const h = LEVEL_BOUNDS.end.y - LEVEL_BOUNDS.start.y
-        // fixed translucent fill + border
-        this.areaBox.beginFill(0x8090b0, 0.25)
-        this.areaBox.drawRect(LEVEL_BOUNDS.start.x, LEVEL_BOUNDS.start.y, w, h)
-        this.areaBox.endFill()
-        this.areaBox.lineStyle(6, 0xffffff, 0.8)
-        this.areaBox.drawRect(LEVEL_BOUNDS.start.x, LEVEL_BOUNDS.start.y, w, h)
     }
     toggleGrid() {
         if (this.gridGraph) this.gridGraph.visible = !!settings.showGrid.enabled
@@ -393,11 +376,6 @@ export class EditorNode extends PIXI.Container {
 
         this.cameraPos = vec(editorPosition.x ?? 0, editorPosition.y ?? 0)
         this.zoomLevel = editorPosition.zoom ?? 0
-
-        this.areaBox = new PIXI.Graphics()
-        this.areaBox.name = "build-area-box"
-        this.addChild(this.areaBox)
-        this.redrawAreaBox()
 
         this.gridGraph = new PIXI.Graphics()
         this.gridGraph.name = "editor-grid"

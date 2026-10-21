@@ -1315,13 +1315,14 @@
 
 <style>
     :root {
-        --menu-height: 300px;
+        --menu-height: 360px;
+        --tray-rows: 2;
         --font-small: 24px;
         --font-medium: 32px;
         --font-large: 48px;
         --side-panel-icon-size: 56px;
         --icon-padding: 15px;
-        --grid-button-size: 70px;
+        --grid-button-size: 92px;
         --grid-gap: 16px;
 
         --tab-width: 170px;
@@ -1334,6 +1335,14 @@
             rgb(183, 247, 130),
             rgb(64, 117, 48)
         );
+    }
+
+    /* tall desktop screens: three rows of objects */
+    @media screen and (min-height: 960px) and (min-width: 900px) {
+        :root {
+            --menu-height: 420px;
+            --tray-rows: 3;
+        }
     }
 
     @media screen and (max-height: 800px) {
@@ -1531,7 +1540,7 @@
 
     .menu {
         width: 100%;
-        height: min(var(--menu-height), 30vh);
+        height: min(var(--menu-height), 40vh);
         display: grid;
         grid-auto-columns: 1fr;
         grid-template-columns: auto 1fr auto;
@@ -2473,16 +2482,25 @@
     }
     .build_objects_grid .tray .obj_buttons_container {
         display: grid;
-        grid-template-rows: repeat(2, calc(var(--grid-button-size) * 0.94));
+        grid-template-rows: repeat(var(--tray-rows, 2), calc(var(--grid-button-size) * 0.94));
         grid-auto-flow: column;
         grid-auto-columns: calc(var(--grid-button-size) * 0.94);
         justify-content: center;
+        justify-items: center; /* cells keep their own square size, never stretched by the grid */
+        align-items: center;
         align-content: center;
         gap: 8px;
         width: max-content;
         min-width: 100%;
         height: 100%;
         padding: 4px 8px;
+        box-sizing: border-box;
+    }
+    .build_objects_grid .tray .obj_buttons_container > .obj_button {
+        flex: none;
+        width: calc(var(--grid-button-size) * 0.94);
+        height: calc(var(--grid-button-size) * 0.94);
+        aspect-ratio: 1 / 1;
     }
     .build_objects_grid .tray .obj_button {
         scroll-snap-align: start;
