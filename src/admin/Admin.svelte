@@ -15,7 +15,7 @@
     import GDText from "../ui/GDText.svelte"
     import GDButton from "../ui/GDButton.svelte"
     import FramePanel from "../ui/FramePanel.svelte"
-    import { exportGmd } from "../editor/exportGmd"
+    import { exportGdlvl } from "../editor/exportGmd"
 
     let open = false
 
@@ -93,8 +93,8 @@
         if (exporting) return
         exporting = true
         try {
-            const n = await exportGmd()
-            toast.push(`Exported ${n} objects to gdplace.gmd`, toastSuccessTheme)
+            const n = await exportGdlvl()
+            toast.push(`Exported ${n} objects to gdplace.gdlvl`, toastSuccessTheme)
         } catch (err) {
             toast.push(`Export failed! (${err?.message ?? "error"})`, toastErrorTheme)
         }
@@ -318,7 +318,7 @@
                         <div class="btns">
                             <GDButton
                                 color="green"
-                                label={exporting ? "Exporting..." : "Export level (.gmd)"}
+                                label={exporting ? "Exporting..." : "Export level (.gdlvl)"}
                                 disabled={exporting}
                                 textSize={22}
                                 on:click={doExport}
