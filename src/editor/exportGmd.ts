@@ -1,5 +1,6 @@
-// Export the whole level as a Geometry Dash .gmd file (level name "gdplace",
+// Export the whole level as a Geometry Dash .gdlvl file (level name "gdplace",
 // description = the website's address).
+// .gdlvl = the .gmd plist XML, gzip-compressed and base64url-encoded.
 import { GDObject, GdColor } from "./object"
 import { api } from "../backend/init"
 
@@ -40,7 +41,7 @@ function buildHeader(channelStrings: string[]) {
     )
 }
 
-export async function exportGmd() {
+export async function exportGdlvl() {
     // admin-only: the server checks the admin session
     const { objects } = (await api("admin", { action: "exportLevel" })) as { objects: string[] }
 
@@ -89,13 +90,19 @@ export async function exportGmd() {
         `<k>k4</k><s>${levelString}</s><k>k5</k><s>gdplace</s><k>k13</k><t /><k>k21</k><i>2</i>` +
         `<k>k16</k><i>1</i><k>k80</k><i>0</i><k>k50</k><i>45</i></dict></plist>`
 
-    const url = URL.createObjectURL(new Blob([gmd], { type: "application/octet-stream" }))
+    // .gdlvl: gzip + base64url of the whole .gmd XML
+    const gdlvl = b64url(await gzip(gmd))
+
+    const url = URL.createObjectURL(new Blob([gdlvl], { type: "application/octet-stream" }))
     const a = document.createElement("a")
     a.href = url
-    a.download = `${LEVEL_NAME}.gmd`
+    a.download = `${LEVEL_NAME}.gdlvl`
     document.body.appendChild(a)
     a.click()
     a.remove()
     setTimeout(() => URL.revokeObjectURL(url), 10000)
     return parts.length
 }
+
+// backwards-compatible alias for existing callers
+export const exportGmd = exportGdlvl
