@@ -80,22 +80,28 @@
 
 <style>
     .scrubber {
-        /* 24px on desktop, 18px on phones (--ui-zoom is 0.75 there) */
-        --h: calc(24px * var(--ui-zoom, 1));
+        /* small bar: 14px on desktop, ~10px on phones (--ui-zoom is 0.75 there) */
+        --h: calc(14px * var(--ui-zoom, 1));
         position: absolute;
-        /* own row below the two rows of corner buttons (playbutton / settings, then admin),
-           so the move button never sits behind any of them */
-        top: calc(var(--corner-gap) * 3 + var(--corner-size) * 2 + var(--h));
-        left: 50%;
-        transform: translateX(-50%);
-        /* leaves room for the move button sticking out at both ends */
-        width: min(420px, calc(100vw - var(--h) * 4));
+        /* same row as the play-music button (top-left) and the Settings / profile buttons (top-right),
+           vertically centred on that row, in the free space between them */
+        top: calc(var(--corner-gap) + (var(--corner-size) - var(--h)) / 2);
+        left: calc(var(--corner-gap) * 2 + var(--corner-size) + var(--h) * 1.3);
+        right: calc(var(--corner-gap) * 3 + var(--corner-size) * 2 + var(--h) * 1.3);
+        margin-inline: auto;
+        max-width: 240px;
         height: var(--h);
         z-index: 25;
         touch-action: none;
         user-select: none;
         -webkit-user-select: none;
         cursor: pointer;
+    }
+    /* invisible, bigger touch target around the thin bar */
+    .scrubber::after {
+        content: "";
+        position: absolute;
+        inset: -14px -6px;
     }
 
     /* groove drawn in 3 parts: left cap | stretchable middle | right cap (sprite is 420x32, caps ~13px) */
