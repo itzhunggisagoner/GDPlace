@@ -211,7 +211,7 @@ const publicUser = (u) => ({
   username: u.username,
   lastPlaced: u.last_placed,
   lastDeleted: u.last_deleted,
-  placeTimer: u.place_timer || null,
+  placeTimer: u.place_timer ?? null, // 0 is a real value: no cooldown (enables the secret swipe tool)
   deleteTimer: u.delete_timer || null,
   admin: !!u.admin,
   banned: !!u.banned,
@@ -409,9 +409,11 @@ async function place(req, env, ctx) {
   if (cnt.n >= st.chunkObjectLimit && !u.admin)
     return err(429, "There are too many objects in this area! Maybe delete one instead?");
 
-  // claim the turn (atomic) – admins have no cooldown
-  if (!u.admin) {
-    const timer = u.place_timer || st.placeTimer;
+  // claim the turn (atomic). Everyone (admins too) uses their personal timer, or the global default when none is set.
+  // A personal timer of 0 means "no cooldown".
+  const timer = u.place_timer ?? st.placeTimer;
+  const hasCooldown = timer > 0;
+  if (hasCooldown) {
     const claim = await env.DB.prepare("UPDATE profiles SET last_placed = ? WHERE account_id = ? AND last_placed <= ?")
       .bind(now, u.account_id, now - (timer - 5) * 1000)
       .run();
@@ -433,11 +435,11 @@ async function place(req, env, ctx) {
       ),
     ]);
   } catch (e) {
-    if (!u.admin) await env.DB.prepare("UPDATE profiles SET last_placed = ? WHERE account_id = ?").bind(u.last_placed, u.account_id).run();
+    if (hasCooldown) await env.DB.prepare("UPDATE profiles SET last_placed = ? WHERE account_id = ?").bind(u.last_placed, u.account_id).run();
     return err(500, "Database error");
   }
   if (Math.random() < 0.02) ctx.waitUntil(pruneChanges(env));
-  return json({ ok: true, key, serverTime: now, lastPlaced: u.admin ? u.last_placed : now });
+  return json({ ok: true, key, serverTime: now, lastPlaced: hasCooldown ? now : u.last_placed });
 }
 
 async function remove(req, env, ctx) {
@@ -599,9 +601,15 @@ async function admin(req, env) {
     case "userTimer": {
       const id = await findAccount(env, b.username);
       if (!id) return err(404, "User not found");
-      const n = (x) => (x === "" || x == null ? null : Math.max(0, Math.floor(+x)) || null);
+      // empty = default (NULL). The personal place timer may be 0 (no cooldown); the delete timer keeps "0 = default".
+      const n = (x, zeroOk) => {
+        if (x === "" || x == null) return null;
+        const v = Math.floor(+x);
+        if (!Number.isFinite(v) || v < 0) return null;
+        return v === 0 && !zeroOk ? null : Math.min(v, 604800);
+      };
       await env.DB.prepare("UPDATE profiles SET place_timer = ?, delete_timer = ? WHERE account_id = ?")
-        .bind(n(b.placeTimer), n(b.deleteTimer), id)
+        .bind(n(b.placeTimer, true), n(b.deleteTimer, false), id)
         .run();
       return json({ ok: true });
     }
