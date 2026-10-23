@@ -76,8 +76,9 @@
 
     let placeTimerMax, deleteTimerMax
     $: {
+        // a personal timer of 0 is real (no cooldown); only "not set" falls back to the global default
         placeTimerMax =
-            $currentUserData?.data?.placeTimer || $placeTimerMaxCommon
+            $currentUserData?.data?.placeTimer ?? $placeTimerMaxCommon
         deleteTimerMax =
             $currentUserData?.data?.deleteTimer || $deleteTimerMaxCommon
     }
@@ -305,6 +306,224 @@
         mobileScreen = mobileScreenQuery.matches
     })
 
+    // ---------- object list sizing ----------
+    // the cell size and number of rows are computed from the real height of the list, so the cells are as big as
+    // they can be (bigger on phones AND desktop) and always fit, whatever the screen size / orientation
+    let trayH = 0
+    let trayRows = 2
+    let trayCell = 64
+    const TRAY_GAP = 8
+    $: {
+        const inner = Math.max(trayH - 12, 0) // tray bottom padding (4) + list padding (4 + 4)
+        const minCell = mobileScreen ? 54 : 70
+        const maxCell = mobileScreen ? 84 : 108
+        if (inner > 0) {
+            trayRows = Math.max(1, Math.min(3, Math.floor((inner + TRAY_GAP) / (minCell + TRAY_GAP))))
+            trayCell = Math.max(
+                40,
+                Math.min(maxCell, Math.floor((inner - TRAY_GAP * (trayRows - 1)) / trayRows))
+            )
+        }
+    }
+
+    // A few GD sprites are tiny: thin lines (120x4 px) or a 6-12 px dot parked in the top-left corner of a
+    // 120x120 transparent picture. Shrunk into a cell they were invisible ("empty" cells), so they are
+    // stretched / zoomed here. Only affects the thumbnail, never the object placed in the level.
+    const THUMB_FIX: Record<number, string> = {
+        468: "width:80%;height:9px;object-fit:fill;",
+        1004: "width:80%;height:10px;object-fit:fill;",
+        1753: "width:80%;height:8px;object-fit:fill;",
+        1754: "width:80%;height:8px;object-fit:fill;",
+        1757: "width:40%;height:8px;object-fit:fill;",
+        1005: "width:10px;height:80%;object-fit:fill;transform:scale(1.6) translate(0,-28.75%);",
+        472: "transform:scale(8) translate(47.5%,47.5%);",
+        473: "transform:scale(5) translate(46.25%,46.25%);",
+        474: "transform:scale(3.5) translate(44.17%,47.08%);",
+        1205: "transform:scale(4) translate(45%,45%);",
+        1206: "transform:scale(4) translate(45%,45%);",
+        1207: "transform:scale(2.5) translate(40%,45%);",
+    }
+
+    // ---------- secret swipe tool ----------
+    // Only for players whose personal place timer is 0 (Admin panel -> "Personal place timer" = 0).
+    // Admins are NOT special: with no personal timer they have the default timer like everybody else.
+    // With swipe on, dragging one finger / the mouse over the map places the selected object (with the
+    // current rotation / colours / layer) on every grid cell the pointer passes over.
+    $: swipeAllowed =
+        $currentUserData?.data?.placeTimer === 0 && !$currentUserData?.data?.banned
+    let swipeOn = false
+    $: if (!swipeAllowed) swipeOn = false
+
+    type SwipeStroke = {
+        pointerId: number
+        tpl: GDObject
+        first: { x: number; y: number }
+        last: { x: number; y: number }
+        started: boolean
+        visited: Set<string>
+        queue: GDObject[]
+        running: number
+        failed: boolean
+        count: number
+    }
+    let swipeStroke: SwipeStroke | null = null
+    let swipeJustDrew = false
+    const swipePointers = new Set<number>()
+    const SWIPE_MAX_PER_STROKE = 400
+    const SWIPE_CONCURRENCY = 4
+
+    const swipeActive = () =>
+        swipeOn &&
+        swipeAllowed &&
+        $canEdit &&
+        currentMenu != EditorMenu.Delete &&
+        !!pixiApp?.editorNode
+
+    const swipeTemplate = (): GDObject | null => {
+        const n = pixiApp?.editorNode
+        if (!n) return null
+        if (n.objectPreview && n.objectPreview.id == n.selectedObjectId) return n.objectPreview.clone()
+        return new GDObject(
+            n.selectedObjectId, 0, 0, 0, false, 1.0, 50,
+            new GdColor("ffffff", false, 1.0),
+            new GdColor("ffffff", false, 1.0)
+        )
+    }
+
+    const swipeCellAt = (e: PointerEvent) => {
+        const w = pixiApp.editorNode.toWorld(vec(e.pageX, e.pageY), pixiApp.canvasSize())
+        return { x: Math.floor(w.x / 30), y: Math.floor(w.y / 30) }
+    }
+
+    // all grid cells from a (excluded) to b (included)
+    const swipeCellsBetween = (a: { x: number; y: number }, b: { x: number; y: number }) => {
+        const out: { x: number; y: number }[] = []
+        let x = a.x
+        let y = a.y
+        const dx = Math.abs(b.x - x)
+        const dy = Math.abs(b.y - y)
+        const sx = x < b.x ? 1 : -1
+        const sy = y < b.y ? 1 : -1
+        let err = dx - dy
+        while ((x !== b.x || y !== b.y) && out.length < 200) {
+            const e2 = 2 * err
+            if (e2 > -dy) {
+                err -= dy
+                x += sx
+            }
+            if (e2 < dx) {
+                err += dx
+                y += sy
+            }
+            out.push({ x, y })
+        }
+        return out
+    }
+
+    const swipeObjectAt = (s: SwipeStroke, cell: { x: number; y: number }) => {
+        const o = s.tpl.clone()
+        const st = getObjSettings(o.id)
+        const off = vec(st.offset_x ?? 0, st.offset_y ?? 0).rotated(-(o.rotation * Math.PI) / 180)
+        o.x = cell.x * 30 + 15 + off.x
+        o.y = cell.y * 30 + 15 + off.y
+        return o
+    }
+
+    const swipePump = (s: SwipeStroke) => {
+        while (!s.failed && s.running < SWIPE_CONCURRENCY && s.queue.length) {
+            const o = s.queue.shift()!
+            s.running++
+            addObjectToLevel(o)
+                .catch((err) => {
+                    if (s.failed) return
+                    s.failed = true
+                    s.queue.length = 0
+                    toast.push(`Swipe stopped! (${err?.message ?? err})`, toastErrorTheme)
+                })
+                .finally(() => {
+                    s.running--
+                    swipePump(s)
+                })
+        }
+    }
+
+    const swipeEnqueue = (s: SwipeStroke, cell: { x: number; y: number }) => {
+        if (s.failed || s.count >= SWIPE_MAX_PER_STROKE) return
+        const key = `${cell.x},${cell.y}`
+        if (s.visited.has(key)) return
+        s.visited.add(key)
+        const { width, height } = levelCells()
+        if (cell.x < 0 || cell.y < 0 || cell.x >= width || cell.y >= height) return
+        s.count++
+        s.queue.push(swipeObjectAt(s, cell))
+        swipePump(s)
+    }
+
+    // returns true when swipe took over the pointer (so the map must not start a camera drag)
+    const swipeDown = (e: PointerEvent): boolean => {
+        if (!swipeActive()) return false
+        swipePointers.add(e.pointerId)
+        if (swipePointers.size > 1) {
+            swipeStroke = null // second finger = pinch zoom, not a stroke
+            return true
+        }
+        const tpl = swipeTemplate()
+        if (!tpl) return true
+        const cell = swipeCellAt(e)
+        swipeStroke = {
+            pointerId: e.pointerId,
+            tpl,
+            first: cell,
+            last: cell,
+            started: false,
+            visited: new Set(),
+            queue: [],
+            running: 0,
+            failed: false,
+            count: 0,
+        }
+        pixiApp.dragging = null
+        try {
+            ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+        } catch {}
+        return true
+    }
+
+    const swipeMove = (e: PointerEvent) => {
+        const s = swipeStroke
+        if (!s || e.pointerId !== s.pointerId || swipePointers.size > 1) return
+        const cell = swipeCellAt(e)
+        if (cell.x === s.last.x && cell.y === s.last.y) return
+        if (!s.started) {
+            // a tap (no movement) still just moves the preview; the stroke only starts once the finger leaves its cell
+            s.started = true
+            swipeEnqueue(s, s.first)
+        }
+        for (const c of swipeCellsBetween(s.last, cell)) swipeEnqueue(s, c)
+        s.last = cell
+        // the preview follows the finger
+        const n = pixiApp.editorNode
+        n.objectPreview = swipeObjectAt(s, cell)
+        n.updateObjectPreview()
+    }
+
+    const swipeEnd = (e: PointerEvent, cancelled = false) => {
+        swipePointers.delete(e.pointerId)
+        const s = swipeStroke
+        if (s && e.pointerId === s.pointerId) {
+            swipeJustDrew = s.started && !cancelled
+            swipeStroke = null
+        }
+    }
+
+    const toggleSwipe = () => {
+        swipeOn = !swipeOn
+        toast.push(
+            swipeOn ? "Swipe ON: drag on the map to place many objects" : "Swipe OFF",
+            toastSuccessTheme
+        )
+    }
+
     let menuIndex = 0
     function nextMenu(): EditorMenu {
         return [EditorMenu.Build, EditorMenu.Edit, EditorMenu.Delete][
@@ -315,7 +534,11 @@
 
 <svelte:window
     on:pointerup={(e) => {
+        swipePointers.delete(e.pointerId)
         pixiApp.dragging = null
+    }}
+    on:pointercancel={(e) => {
+        swipePointers.delete(e.pointerId)
     }}
     on:pointermove={(e) => {
         pixiApp.mousePos = vec(e.pageX, e.pageY)
@@ -381,6 +604,7 @@
         class="pixi_canvas"
         bind:this={$pixiCanvas}
         on:pointerdown={(e) => {
+            if (swipeDown(e)) return
             pixiApp.draggingThresholdReached = false
             pixiApp.dragging = {
                 prevCamera: pixiApp.editorNode.cameraPos.clone(),
@@ -447,10 +671,17 @@
         on:pinchup={() => {
                 pixiApp.pinching = null
         }}
+        on:pointermove={swipeMove}
+        on:pointercancel={(e) => swipeEnd(e, true)}
         on:pointerup={(e) => {
-    
+            swipeEnd(e)
             pixiApp.pinching = null
             pixiApp.mousePos = vec(e.pageX, e.pageY)
+            if (swipeJustDrew) {
+                // a swipe just placed objects: don't also drop the preview where the finger was lifted
+                swipeJustDrew = false
+                return
+            }
             if (currentMenu == EditorMenu.Delete) {
                 return
             }
@@ -619,6 +850,22 @@
 
     {#if $canEdit && !settings.hideMenu.enabled}
         <div class="menu">
+            {#if swipeAllowed && currentMenu != EditorMenu.Delete}
+                <!-- secret swipe toggle: faint on purpose, only exists for players with place timer 0 -->
+                <button
+                    class="swipe_toggle invis_button"
+                    class:on={swipeOn}
+                    title="Swipe"
+                    aria-label="Swipe to place many objects"
+                    aria-pressed={swipeOn}
+                    on:click={toggleSwipe}
+                >
+                    <svg viewBox="0 0 24 24" width="62%" height="62%" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M3 15c3-6 6 6 9 0s6 6 9 0" />
+                        <path d="M17 6l4 3-4 3" />
+                    </svg>
+                </button>
+            {/if}
             <div
                 class="side_panel menu_panel"
                 style={mobileScreen
@@ -810,7 +1057,11 @@
                         {/each}
                     </div>
                     <div class="objects_grid_container build_objects_grid">
-                        <div class="tray">
+                        <div
+                            class="tray"
+                            bind:clientHeight={trayH}
+                            style="--cell: {trayCell}px; --rows: {trayRows}"
+                        >
                         <div class="objects_grid" id="objects_list">
                             <div class="obj_buttons_container grid_padding">
                                 {#each OBJECT_SETTINGS.filter((objectData) =>
@@ -844,6 +1095,7 @@
                                             draggable="false"
                                             alt=""
                                             class="button_icon"
+                                            style={THUMB_FIX[objectData.id] ?? ""}
                                             use:lazyLoad={`/gd/objects/main/${objectData.id}.png`}
                                         />
                                         {#if objectData.comment}
@@ -874,10 +1126,9 @@
                     <div class="tabs">
                         {#each EDIT_BUTTONS as editTab, i}
                             <button
-                                class="tab_button invis_button"
-                                style={currentEditTab === i
-                                    ? "height: 40px;"
-                                    : "height: 32px; margin-top: 8px;"}
+                                class="tab_button edit_tab_button invis_button"
+                                class:active={currentEditTab === i}
+                                aria-pressed={currentEditTab === i}
                                 on:click={() => {
                                     currentEditTab = i
                                 }}
@@ -1347,13 +1598,13 @@
 
     @media screen and (max-height: 800px) {
         :root {
-            --menu-height: 220px;
+            --menu-height: 250px;
             --font-small: 20px;
             --font-medium: 30px;
             --font-large: 40px;
             --side-panel-icon-size: 38px;
             --timer-scale: 0.678571429;
-            --grid-button-size: 50px;
+            --grid-button-size: 64px;
             --grid-gap: 12px;
             --timer-font: 40px;
         }
@@ -1361,14 +1612,14 @@
 
     @media screen and (max-height: 375px) {
         :root {
-            --menu-height: 150px;
+            --menu-height: 170px;
             --font-small: 18px;
             --font-medium: 24px;
             --font-large: 32px;
             --side-panel-icon-size: 38px;
             --icon-padding: 5px;
             --timer-scale: 0.5;
-            --grid-button-size: 35px;
+            --grid-button-size: 50px;
             --grid-gap: 10px;
             --timer-font: 24px;
         }
@@ -1420,7 +1671,7 @@
 
     @media screen and (orientation: portrait) {
         :root {
-            --grid-button-size: 45px;
+            --grid-button-size: 62px;
             --grid-gap: 12px;
             --font-medium: 22px;
             --font-large: 32px;
@@ -1429,8 +1680,15 @@
         }
 
         .menu {
-            grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) !important;
+            /* the object list gets the bigger row; Place + the mode buttons the smaller one */
+            grid-template-rows: minmax(0, 1.7fr) minmax(0, 1fr) !important;
             row-gap: var(--grid-gap) !important;
+            height: min(46vh, 430px) !important;
+        }
+
+        /* the secret swipe toggle goes above the category tabs on phones (the tabs span the width) */
+        .swipe_toggle {
+            top: -84px !important;
         }
 
         .side_panel {
@@ -1463,7 +1721,7 @@
 
     @media screen and (max-width: 600px) {
         :root {
-            --grid-button-size: 30px;
+            --grid-button-size: 56px;
             --font-medium: 18px;
         }
     }
@@ -1530,6 +1788,7 @@
         position: fixed;
     }
     .editor > .pixi_canvas {
+        touch-action: none; /* the map handles its own drag / pinch / swipe gestures */
         position: fixed;
         inset: 0;
         width: 100%;
@@ -1540,7 +1799,7 @@
 
     .menu {
         width: 100%;
-        height: min(var(--menu-height), 40vh);
+        height: min(var(--menu-height), 44vh);
         display: grid;
         grid-auto-columns: 1fr;
         grid-template-columns: auto 1fr auto;
@@ -1552,8 +1811,12 @@
         z-index: 20;
         isolation: isolate;
         padding: var(--grid-gap);
+        padding-bottom: calc(var(--grid-gap) + env(safe-area-inset-bottom, 0px));
 
+        /* pinned to the bottom edge: its place never depends on the flex layout / browser bars */
         position: fixed;
+        left: 0;
+        bottom: 0;
         animation-name: menu_in;
         animation-duration: 0.24s;
         animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -1806,9 +2069,21 @@
         -webkit-text-stroke: 1.5px black;
         color: white;
         font-size: var(--font-small);
-        transition: opacity 0.12s ease, filter 0.12s ease;
+        /* no transition: the tabs must never animate / bounce when switching */
+        transition: none;
         backdrop-filter: blur(30px);
         -webkit-backdrop-filter: blur(30px);
+    }
+    /* Edit tabs (Transform / Layers / Colors): same size selected or not, only the brightness changes */
+    .tabs .edit_tab_button {
+        height: 36px;
+        margin-top: 0;
+        opacity: 0.55;
+        transform: none !important;
+    }
+    .tabs .edit_tab_button.active {
+        opacity: 1;
+        background-color: #000f;
     }
 
     .obj_tab_button {
@@ -2436,8 +2711,8 @@
         inset: 0;
         margin: auto;
         display: block;
-        width: 54%;
-        height: 54%;
+        width: 60%;
+        height: 60%;
         max-width: none;
         max-height: none;
         object-fit: contain;
@@ -2447,6 +2722,33 @@
 
     .invis_button {
         cursor: pointer;
+    }
+
+    /* secret swipe toggle: sits just above the Place button, very faint until it is switched on */
+    .swipe_toggle {
+        position: absolute;
+        right: var(--grid-gap);
+        top: -46px;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        background: #000a;
+        border: 2px solid #ffffff55;
+        opacity: 0.3;
+        transition: opacity 0.15s, background-color 0.15s;
+        z-index: 3;
+    }
+    .swipe_toggle:hover {
+        opacity: 0.7;
+    }
+    .swipe_toggle.on {
+        opacity: 1;
+        background: #2f9a1f;
+        border-color: #c6f249;
     }
 
     .color_icon {
@@ -2482,9 +2784,10 @@
     }
     .build_objects_grid .tray .obj_buttons_container {
         display: grid;
-        grid-template-rows: repeat(var(--tray-rows, 2), calc(var(--grid-button-size) * 0.94));
+        /* --cell / --rows are computed in the script from the real height of the list */
+        grid-template-rows: repeat(var(--rows, 2), var(--cell, 64px));
         grid-auto-flow: column;
-        grid-auto-columns: calc(var(--grid-button-size) * 0.94);
+        grid-auto-columns: var(--cell, 64px);
         justify-content: center;
         justify-items: center; /* cells keep their own square size, never stretched by the grid */
         align-items: center;
@@ -2498,8 +2801,10 @@
     }
     .build_objects_grid .tray .obj_buttons_container > .obj_button {
         flex: none;
-        width: calc(var(--grid-button-size) * 0.94);
-        height: calc(var(--grid-button-size) * 0.94);
+        width: var(--cell, 64px);
+        height: var(--cell, 64px);
+        min-width: var(--cell, 64px);
+        min-height: var(--cell, 64px);
         aspect-ratio: 1 / 1;
     }
     .build_objects_grid .tray .obj_button {
