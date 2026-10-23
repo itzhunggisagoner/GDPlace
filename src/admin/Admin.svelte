@@ -454,13 +454,13 @@
                         <label class="field">
                             <GDText
                                 font="chat"
-                                text="Personal place timer (empty = default)"
+                                text="Personal place timer (empty = default, 0 = none + secret swipe)"
                                 size={22}
                             />
                             <input
                                 class="gd_input"
                                 type="number"
-                                min="1"
+                                min="0"
                                 bind:value={userPlaceTimer}
                             />
                         </label>
