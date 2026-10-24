@@ -80,8 +80,8 @@
 
 <style>
     .scrubber {
-        /* small bar: 14px on desktop, ~10px on phones (--ui-zoom is 0.75 there) */
-        --h: calc(14px * var(--ui-zoom, 1));
+        /* 22px on a 1440px-wide screen, grows with the width (--wscale, set by the Editor); ~16px on phones */
+        --h: calc(22px * var(--ui-zoom, 1) * var(--wscale, 1));
         position: absolute;
         /* same row as the play-music button (top-left) and the Settings / profile buttons (top-right),
            vertically centred on that row, in the free space between them */
@@ -89,7 +89,7 @@
         left: calc(var(--corner-gap) * 2 + var(--corner-size) + var(--h) * 1.3);
         right: calc(var(--corner-gap) * 3 + var(--corner-size) * 2 + var(--h) * 1.3);
         margin-inline: auto;
-        max-width: 240px;
+        max-width: calc(300px * var(--wscale, 1));
         height: var(--h);
         z-index: 25;
         touch-action: none;
