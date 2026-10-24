@@ -1,17 +1,11 @@
-![Logo](https://github.com/itzhunggisagoner/GDPlace/raw/refs/heads/main/public/logo.png)
+![gd/place Logo](https://github.com/itzhunggisagoner/GDPlace/raw/refs/heads/main/public/logo.png)
 
 # GD Place
 
-A collaborative **Geometry Dash level editor in the style of r/place**: everyone places and deletes GD objects
-on one huge shared level, with a cooldown between actions. You log in with your **Geometry Dash account**,
-and everything runs on **Cloudflare Workers + D1** (no Firebase).
+A collaborative **Geometry Dash level editor**: everyone places and deletes GD objects
+on one huge shared level, with a cooldown between actions. You log in with your **Geometry Dash account** (**the password will never be stored**).
 
 Based on [PlaceGD/gd-place-2022](https://github.com/PlaceGD/gd-place-2022) (MIT, © Spu7Nix, FlowVix, DexterHill0, GDColon).
-
-- **Frontend:** Svelte + Vite + PixiJS (`src/`, `public/`)
-- **Backend:** one Cloudflare Worker (`worker/index.js`): API, game rules, admin
-- **Database:** Cloudflare D1 (`schema.sql`)
-- **Login:** GD username + password, checked directly against the GD servers. The password is never stored; the session is an HttpOnly cookie.
 
 ## Run it
 
@@ -90,11 +84,6 @@ src/ui/             shared UI: GDText, GDButton, FramePanel, NotificationHost, a
 src/                editor, settings, login popup, landing page
 public/             images, fonts, sounds
 ```
-
-## How live updates work
-
-The editor loads a snapshot of each chunk (`/api/chunk`) and polls `/api/changes` about every 2.5 seconds.
-Your own changes show up immediately. The change log is pruned after 6 hours; clients that fall behind reload their chunks.
 
 ## License
 
