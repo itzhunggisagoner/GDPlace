@@ -6,6 +6,7 @@ import { vec, Vector } from "../utils/vector"
 import { GdColor, getObjSettings, type GDObject } from "./object"
 import {
     deleteObjectFromLevel,
+    refreshChunk,
     initChunkBehavior,
     CHUNK_SIZE,
     ChunkNode,
@@ -81,6 +82,8 @@ export class EditorNode extends PIXI.Container {
     public cameraPos: Vector = vec(0, 0)
     public objectPreview: GDObject | null = null
     public objectPreviewNode: ObjectNode | null = null
+    public pendingObjects: GDObject[] = []
+    public pendingObjectNodes: ObjectNode[] = []
     public layerGroup: PIXI_LAYERS.Group
 
     public deleteLabels: PIXI.Container
@@ -285,6 +288,35 @@ export class EditorNode extends PIXI.Container {
         }
     }
 
+    // Stage locally for immediate visual feedback. Nothing reaches the server until Place.
+    stagePendingObject(obj: GDObject) {
+        if (this.pendingObjects.length >= 99) {
+            throw new Error("You can stage up to 100 objects per placement")
+        }
+        const copy = obj.clone()
+        this.pendingObjects.push(copy)
+
+        const node = new ObjectNode(copy, this.layerGroup, null)
+        node.name = `pending-${this.pendingObjectNodes.length}-${Date.now()}`
+        node.alpha = 0.9
+        const box = new PIXI.Graphics()
+        box.name = "pending_box"
+        box.lineStyle(2, 0xffd84d, 0.95).drawRect(
+            -22, -22, 44, 44
+        )
+        node.addChild(box)
+        this.pendingObjectNodes.push(node)
+        this.addChild(node)
+    }
+
+    clearPendingObjects() {
+        for (const node of this.pendingObjectNodes) {
+            node.destroy({ children: true })
+        }
+        this.pendingObjectNodes = []
+        this.pendingObjects = []
+    }
+
     setObjectsSelectable(willYouMakeThemSelectable: boolean) {
         this.selectableWorld.visible = willYouMakeThemSelectable
     }
@@ -299,13 +331,22 @@ export class EditorNode extends PIXI.Container {
     }
     deleteSelectedObject(then, els) {
         if (this.selectedObjectNode != null) {
-            let name = this.selectedObjectNode.name
-            let chunk = this.selectedObjectChunk
+            const name = this.selectedObjectNode.name
+            const chunkName = this.selectedObjectChunk
             this.deselectObject()
-            deleteObjectFromLevel(name, chunk)
+
+            // Optimistic remove: destroy both the visible object and its hit target now.
+            // If the server rejects the delete, refresh the chunk to restore authoritative data.
+            const chunk = chunkName
+                ? (this.world.getChildByName(chunkName) as ChunkNode | null)
+                : null
+            if (chunk?.removeObject) chunk.removeObject(name)
+
+            deleteObjectFromLevel(name, chunkName)
                 .then(then)
-                .catch((err) => {
+                .catch(async (err) => {
                     console.log(err)
+                    if (chunkName) await refreshChunk(chunkName)
                     toast.push(
                         `Failed to delete object! (${err.message})`,
                         toastErrorTheme

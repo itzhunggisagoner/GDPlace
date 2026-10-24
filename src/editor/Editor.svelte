@@ -30,6 +30,7 @@
     import { lazyLoad } from "../lazyLoad"
     import {
         addObjectToLevel,
+        addObjectsToLevel,
         deleteTimerMaxCommon,
         getUsernameColors,
         placeTimerMaxCommon,
@@ -89,6 +90,7 @@
         if (!pixiApp?.editorNode) return
         if (currentMenu == EditorMenu.Delete) {
             pixiApp.editorNode.removePreview()
+            lastPreviewCell = null
             pixiApp.editorNode.setObjectsSelectable(true)
             pixiApp.editorNode.tooltip.show = false
         } else {
@@ -248,6 +250,8 @@
     // in event that cloud function returns slowly
     let placeButtonDisabled = false
     let deleteButtonDisabled = false
+    let pendingObjectCount = 0
+    let lastPreviewCell: { x: number; y: number } | null = null
 
     let placeTimerSound = new LazyHowl({
         src: ["/gd/world/crystal01.ogg"],
@@ -738,10 +742,47 @@
                         .snapped(30)
                         .plus(vec(15, 15))
 
+                    const editorNode = pixiApp.editorNode
+                    const currentPreview = editorNode.objectPreview
+                    const targetCellX = Math.floor(snapped.x / 30)
+                    const targetCellY = Math.floor(snapped.y / 30)
+                    let previousCell = lastPreviewCell
+                    if (currentPreview && !previousCell) {
+                        // Recover the snapped cell for a preview restored from session storage.
+                        // Object metadata can include large visual offsets, so subtract them.
+                        const previousSettings = getObjSettings(currentPreview.id)
+                        const offset = vec(
+                            previousSettings.offset_x ?? 0,
+                            previousSettings.offset_y ?? 0
+                        ).rotated(-(currentPreview.rotation * Math.PI) / 180)
+                        previousCell = {
+                            x: Math.floor((currentPreview.x - offset.x) / 30),
+                            y: Math.floor((currentPreview.y - offset.y) / 30),
+                        }
+                    }
+                    const movingToAnotherCell =
+                        currentPreview != null &&
+                        currentPreview.id === editorNode.selectedObjectId &&
+                        previousCell != null &&
+                        (previousCell.x !== targetCellX || previousCell.y !== targetCellY)
+
+                    // Clicking another cell stages the previous preview locally, then moves
+                    // the active preview to the new cell. The server is untouched until Place.
+                    if (movingToAnotherCell) {
+                        if (editorNode.pendingObjects.length >= 99) {
+                            toast.push(
+                                "You can place at most 100 blocks at once. Press Place to submit them first.",
+                                toastErrorTheme
+                            )
+                            return
+                        }
+                        editorNode.stagePendingObject(currentPreview)
+                        pendingObjectCount = editorNode.pendingObjects.length
+                    }
+
                     if (
-                        pixiApp.editorNode.objectPreview == null ||
-                        pixiApp.editorNode.selectedObjectId !=
-                            pixiApp.editorNode.objectPreview?.id
+                        editorNode.objectPreview == null ||
+                        editorNode.selectedObjectId != editorNode.objectPreview?.id
                     ) {
                         pixiApp.editorNode.objectPreview = new GDObject(
                             pixiApp.editorNode.selectedObjectId,
@@ -770,6 +811,7 @@
                         // obj.x += offVec.x
                         // obj.y += offVec.y
                     }
+                    lastPreviewCell = { x: targetCellX, y: targetCellY }
                     pixiApp.editorNode.updateObjectPreview()
                 }
             }
@@ -1493,28 +1535,34 @@
                 <button
                     class="place_button invis_button wiggle_button"
                     disabled={placeButtonDisabled || placeTimeLeft > 0}
-                    on:click={() => {
-                        if (
-                            pixiApp.editorNode.objectPreview &&
-                            placeTimeLeft == 0 &&
-                            !placeButtonDisabled
-                        ) {
-                            placeButtonDisabled = true
-                            addObjectToLevel(pixiApp.editorNode.objectPreview)
-                                .catch((err) => {
-                                    console.log(err)
-                                    toast.push(
-                                        `Failed to place object! (${err.message})`,
-                                        toastErrorTheme
-                                    )
+                    on:click={async () => {
+                        const editorNode = pixiApp?.editorNode
+                        if (!editorNode || placeTimeLeft > 0 || placeButtonDisabled) return
 
-                                    placeButtonDisabled = false
-                                })
-                                .then(() => {
-                                    pixiApp.editorNode.removePreview()
+                        const objects = editorNode.pendingObjects.map((obj) => obj.clone())
+                        if (editorNode.objectPreview) objects.push(editorNode.objectPreview.clone())
+                        if (!objects.length) return
+                        if (objects.length > 100) {
+                            toast.push("You can place at most 100 blocks at once.", toastErrorTheme)
+                            return
+                        }
 
-                                    placeButtonDisabled = false
-                                })
+                        placeButtonDisabled = true
+                        try {
+                            await addObjectsToLevel(objects)
+                            editorNode.clearPendingObjects()
+                            editorNode.removePreview()
+                            pendingObjectCount = 0
+                            lastPreviewCell = null
+                        } catch (err) {
+                            console.error(err)
+                            toast.push(
+                                `Failed to place blocks! (${err?.message ?? err})`,
+                                toastErrorTheme
+                            )
+                            // Keep all staged blocks visible so the player can retry.
+                        } finally {
+                            placeButtonDisabled = false
                         }
                     }}
                 >
@@ -1525,7 +1573,9 @@
                             ? 1.0
                             : 0.7});transition: ease-in-out 0.4s;"
                     >
-                        Place
+                        Place{pendingObjectCount > 0
+                            ? ` (${pendingObjectCount + (pixiApp?.editorNode?.objectPreview ? 1 : 0)})`
+                            : ""}
                     </div>
 
                     <div
