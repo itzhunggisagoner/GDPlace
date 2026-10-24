@@ -23,5 +23,6 @@ export async function api<T = any>(path: string, body?: unknown): Promise<T> {
 }
 
 export const placeObject = (d: { text: string }) => api("place", d)
+export const placeObjects = (d: { texts: string[] }) => api("place-batch", d)
 export const deleteObject = (d: { objId: string; chunkId: string }) =>
     api("delete", d)

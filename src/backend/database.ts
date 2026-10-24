@@ -9,7 +9,7 @@ import {
     ObjectNode,
     resetObjectColors,
 } from "../editor/nodes"
-import { api, deleteObject, placeObject, serverToLocal } from "./init"
+import { api, deleteObject, placeObject, placeObjects, serverToLocal } from "./init"
 import { vec } from "../utils/vector"
 import { canEdit, patchUser } from "./auth"
 import { pixiApp, selectedObject, TIMELAPSE_MODE } from "../editor/app"
@@ -80,6 +80,11 @@ async function fetchChunk(name: string, h: ChunkHandlers) {
     } catch (e) {
         console.error("chunk load failed", name, e)
     }
+}
+
+export function refreshChunk(name: string) {
+    const h = chunkSubs.get(name)
+    if (h) return fetchChunk(name, h)
 }
 
 export function subscribeChunk(name: string, h: ChunkHandlers) {
@@ -184,6 +189,25 @@ export const addObjectToLevel = async (obj: GDObject) => {
     const data = obj.toDatabaseString()
     const r = await placeObject({ text: data })
     patchUser({ lastPlaced: serverToLocal(r.lastPlaced) })
+    pollChangesNow()
+    return r
+}
+
+// Commit a staged set in one request. The server checks cooldown and permissions once
+// for the entire batch, while each object remains individually validated and recorded.
+export const addObjectsToLevel = async (objects: GDObject[]) => {
+    if (!objects.length) throw new Error("No objects to place")
+    if (objects.length > 100) throw new Error("You can place at most 100 objects at once")
+
+    const texts = objects.map((obj) => obj.toDatabaseString())
+    const r = await placeObjects({ texts })
+    patchUser({ lastPlaced: serverToLocal(r.lastPlaced) })
+
+    // Display committed objects immediately on this client rather than waiting for polling.
+    for (const item of r.objects ?? []) {
+        const h = chunkSubs.get(item.chunk)
+        if (h) h.add(String(item.key), item.text)
+    }
     pollChangesNow()
     return r
 }
