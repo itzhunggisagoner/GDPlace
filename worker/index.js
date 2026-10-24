@@ -448,6 +448,105 @@ async function place(req, env, ctx) {
   return json({ ok: true, key, serverTime: now, lastPlaced: hasCooldown ? now : u.last_placed });
 }
 
+
+// Batch placement used by the editor's local staging queue. One cooldown claim covers
+// the whole batch, but every object is validated and attributed independently.
+async function placeBatch(req, env, ctx) {
+  const u = await auth(req, env);
+  if (!u) return err(401, "User is not authenticated");
+  const body = await req.json().catch(() => ({}));
+  const texts = body?.texts;
+  if (!Array.isArray(texts) || texts.length < 1 || texts.length > 100)
+    return err(400, "A placement batch must contain between 1 and 100 objects");
+
+  const st = await getSettings(env);
+  const now = Date.now();
+  const g = gate(u, st, now);
+  if (g) return g;
+
+  const prepared = [];
+  const countsByChunk = new Map();
+  for (const text of texts) {
+    if (typeof text !== "string" || text.length > 200)
+      return err(400, "Invalid object");
+    const props = text.split(";");
+    const bad = validateObject(props, st);
+    if (bad) return err(400, bad);
+    const cx = Math.floor(parseFloat(props[1]) / CHUNK);
+    const cy = Math.floor(parseFloat(props[2]) / CHUNK);
+    const chunk = `${cx},${cy}`;
+    prepared.push({ text, chunk });
+    countsByChunk.set(chunk, (countsByChunk.get(chunk) || 0) + 1);
+  }
+
+  if (!u.admin) {
+    for (const [chunk, addCount] of countsByChunk) {
+      const cnt = await env.DB.prepare("SELECT COUNT(*) n FROM objects WHERE chunk = ?").bind(chunk).first();
+      if (cnt.n + addCount > st.chunkObjectLimit)
+        return err(429, "There are too many objects in this area! Maybe delete one instead?");
+    }
+  }
+
+  const timer = u.place_timer ?? st.placeTimer;
+  const hasCooldown = timer > 0;
+  if (hasCooldown) {
+    const claim = await env.DB.prepare(
+      "UPDATE profiles SET last_placed = ? WHERE account_id = ? AND last_placed <= ?"
+    ).bind(now, u.account_id, now - (timer - 5) * 1000).run();
+    if (!claim.meta.changes) return err(429, "Object placed before cooldown");
+  } else {
+    const recent = await env.DB.prepare(
+      "SELECT COUNT(*) n FROM changes WHERE kind = 'add' AND by = ? AND at > ?"
+    ).bind(u.username, now - 10000).first();
+    if (recent.n + prepared.length > 150)
+      return err(429, "Slow down! Too many objects too fast");
+  }
+
+  let inserted = [];
+  try {
+    const values = prepared.map(() => "(?,?,?,?,?)").join(",");
+    const binds = [];
+    for (const item of prepared) binds.push(item.chunk, item.text, u.account_id, u.username, now);
+    const result = await env.DB.prepare(
+      `INSERT INTO objects(chunk,data,account_id,username,placed_at) VALUES ${values} RETURNING id, chunk, data`
+    ).bind(...binds).all();
+    inserted = result.results || [];
+    if (inserted.length !== prepared.length) throw new Error("Batch insert incomplete");
+
+    const statements = [];
+    for (const row of inserted) {
+      const key = String(row.id);
+      statements.push(
+        env.DB.prepare("INSERT INTO changes(chunk,key,kind,data,by,at) VALUES(?,?,'add',?,?,?)")
+          .bind(row.chunk, key, row.data, u.username, now),
+        env.DB.prepare("INSERT INTO obj_history(kind,key,chunk,data,account_id,username,at) VALUES('place',?,?,?,?,?,?)")
+          .bind(key, row.chunk, row.data, u.account_id, u.username, now)
+      );
+    }
+    await env.DB.batch(statements);
+  } catch (e) {
+    if (inserted.length) {
+      const marks = inserted.map(() => "?").join(",");
+      await env.DB.prepare(`DELETE FROM objects WHERE id IN (${marks})`)
+        .bind(...inserted.map((r) => r.id)).run().catch(() => {});
+    }
+    if (hasCooldown) {
+      await env.DB.prepare("UPDATE profiles SET last_placed = ? WHERE account_id = ?")
+        .bind(u.last_placed, u.account_id).run().catch(() => {});
+    }
+    console.error("Batch placement failed", e);
+    return err(500, "Database error");
+  }
+
+  if (Math.random() < 0.02) ctx.waitUntil(pruneChanges(env));
+  return json({
+    ok: true,
+    serverTime: now,
+    lastPlaced: hasCooldown ? now : u.last_placed,
+    objects: inserted.map((row) => ({ key: String(row.id), chunk: row.chunk, text: row.data }))
+  });
+}
+
 async function remove(req, env, ctx) {
   const u = await auth(req, env);
   if (!u) return err(401, "User is not authenticated");
@@ -656,6 +755,7 @@ async function handle(req, env, ctx) {
       if (p === "/api/login" && post) return await login(req, env);
       if (p === "/api/logout" && post) return await logout(req, env);
       if (p === "/api/place" && post) return await place(req, env, ctx);
+      if (p === "/api/place-batch" && post) return await placeBatch(req, env, ctx);
       if (p === "/api/delete" && post) return await remove(req, env, ctx);
       if (p === "/api/admin" && post) return await admin(req, env);
       return err(404, "Not found");
