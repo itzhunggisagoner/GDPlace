@@ -506,7 +506,7 @@
         }
         pixiApp.dragging = null
         try {
-            ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+            ;if (e.currentTarget instanceof HTMLElement) e.currentTarget.setPointerCapture(e.pointerId)
         } catch {}
         return true
     }
@@ -577,7 +577,7 @@
     }}
     on:keydown={(e) => {
         // never steal keys while the player is typing (login, Admin panel fields...) or using Ctrl/Cmd shortcuts
-        const t = e.target as HTMLElement | null
+        const t = e.target instanceof HTMLElement ? e.target : null
         if (
             t &&
             (t.isContentEditable ||
