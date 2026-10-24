@@ -92,8 +92,14 @@ export function subscribeChunk(name: string, h: ChunkHandlers) {
 
 let lastSeq = -1
 let polling = false
+let pollAgain = false
 export async function pollChangesNow() {
-    if (polling) return
+    // a call made while a poll is running used to be dropped, so an object placed right then only
+    // showed up on the next 2.5 s tick (swipe places many): remember it and poll once more
+    if (polling) {
+        pollAgain = true
+        return
+    }
     polling = true
     try {
         if (lastSeq < 0) {
@@ -133,6 +139,10 @@ export async function pollChangesNow() {
         console.error("changes poll failed", e)
     } finally {
         polling = false
+        if (pollAgain) {
+            pollAgain = false
+            pollChangesNow()
+        }
     }
 }
 setInterval(() => {
