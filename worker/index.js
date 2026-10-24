@@ -299,7 +299,7 @@ async function state(req, env) {
   });
 }
 
-const CHUNK_RE = /^\d{1,3},\d{1,2}$/;
+const CHUNK_RE = /^\d{1,4},\d{1,3}$/; // 4 digits: admins can make the level up to 20000 cells wide
 
 async function chunk(url, env) {
   const c = url.searchParams.get("c") || "";
@@ -350,7 +350,7 @@ async function userColor(url, env) {
 
 // ---------- object validation (ported from cloudfunctions/functions/src/index.ts) ----------
 function validateObject(props, st) {
-  if (props.length < 13) return "Invalid object";
+  if (props.length !== 13) return "Invalid object"; // exactly 13 fields: no extra data smuggled into the level
   const [id, x, y, rotation, flip, scale, zOrder, mainColor, mainBlending, mainOpacity, detailColor, detailBlending, detailOpacity] =
     props;
   const found = OBJ_BY_ID.get(parseInt(id));
@@ -418,6 +418,12 @@ async function place(req, env, ctx) {
       .bind(now, u.account_id, now - (timer - 5) * 1000)
       .run();
     if (!claim.meta.changes) return err(429, "Object placed before cooldown");
+  } else {
+    // no cooldown (personal timer 0 / swipe): still cap the speed so nobody can flood the database
+    const recent = await env.DB.prepare("SELECT COUNT(*) n FROM changes WHERE kind = 'add' AND by = ? AND at > ?")
+      .bind(u.username, now - 10000)
+      .first();
+    if (recent.n >= 150) return err(429, "Slow down! Too many objects too fast");
   }
 
   let key;
