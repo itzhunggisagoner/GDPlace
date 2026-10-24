@@ -99,14 +99,18 @@ export function storePosState(app: EditorApp) {
 
     setUrlDebounced(x, y, zoom)
 
-    localStorage.setItem(
-        "editorPosition",
-        JSON.stringify({
-            x: app.editorNode.cameraPos.x,
-            y: app.editorNode.cameraPos.y,
-            zoom: app.editorNode.zoomLevel,
-        })
-    )
+    try {
+        localStorage.setItem(
+            "editorPosition",
+            JSON.stringify({
+                x: app.editorNode.cameraPos.x,
+                y: app.editorNode.cameraPos.y,
+                zoom: app.editorNode.zoomLevel,
+            })
+        )
+    } catch {
+        // storage blocked / full (private mode): the position just isn't remembered
+    }
 }
 
 export class EditorApp {

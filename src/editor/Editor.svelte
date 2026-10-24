@@ -306,6 +306,18 @@
         mobileScreen = mobileScreenQuery.matches
     })
 
+    // ---------- UI scale follows the screen WIDTH ----------
+    // wide screens (>= 900px) scale the menu, tabs and move bar up; phones keep their own sizes.
+    // --wscale is also read by MapScrubber.svelte
+    let wscale = 1
+    const updateWScale = () => {
+        const w = window.innerWidth
+        wscale = w >= 900 ? clamp(w / 1440, 0.9, 1.5) : 1
+        document.documentElement.style.setProperty("--wscale", String(wscale))
+    }
+    updateWScale()
+    window.addEventListener("resize", updateWScale)
+
     // ---------- object list sizing ----------
     // the cell size and number of rows are computed from the real height of the list, so the cells are as big as
     // they can be (bigger on phones AND desktop) and always fit, whatever the screen size / orientation
@@ -313,12 +325,18 @@
     let trayRows = 2
     let trayCell = 64
     const TRAY_GAP = 8
+    // size of the category tabs (the bar above the list)
+    $: tabSize = mobileScreen ? 40 : Math.round(56 * wscale)
     $: {
         const inner = Math.max(trayH - 12, 0) // tray bottom padding (4) + list padding (4 + 4)
-        const minCell = mobileScreen ? 54 : 70
-        const maxCell = mobileScreen ? 84 : 108
+        // phones: smaller cells (46-56px, up to 4 rows); wide screens: cells grow with the width
+        const minCell = mobileScreen ? 46 : 70 * wscale
+        const maxCell = mobileScreen ? 56 : 108 * wscale
         if (inner > 0) {
-            trayRows = Math.max(1, Math.min(3, Math.floor((inner + TRAY_GAP) / (minCell + TRAY_GAP))))
+            trayRows = Math.max(
+                1,
+                Math.min(mobileScreen ? 4 : 3, Math.floor((inner + TRAY_GAP) / (minCell + TRAY_GAP)))
+            )
             trayCell = Math.max(
                 40,
                 Math.min(maxCell, Math.floor((inner - TRAY_GAP * (trayRows - 1)) / trayRows))
@@ -535,12 +553,13 @@
 <svelte:window
     on:pointerup={(e) => {
         swipePointers.delete(e.pointerId)
-        pixiApp.dragging = null
+        if (pixiApp) pixiApp.dragging = null
     }}
     on:pointercancel={(e) => {
         swipePointers.delete(e.pointerId)
     }}
     on:pointermove={(e) => {
+        if (!pixiApp) return
         pixiApp.mousePos = vec(e.pageX, e.pageY)
         if (
             pixiApp.dragging &&
@@ -553,7 +572,16 @@
         }
     }}
     on:keydown={(e) => {
-        if ($canEdit) {
+        // never steal keys while the player is typing (login, Admin panel fields...) or using Ctrl/Cmd shortcuts
+        const t = e.target as HTMLElement | null
+        if (
+            t &&
+            (t.isContentEditable ||
+                ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName))
+        )
+            return
+        if (e.ctrlKey || e.metaKey) return
+        if ($canEdit && pixiApp?.editorNode) {
             if (e.code == "Digit1") {
                 e.preventDefault()
                 switchMenu(EditorMenu.Build)
@@ -850,22 +878,6 @@
 
     {#if $canEdit && !settings.hideMenu.enabled}
         <div class="menu">
-            {#if swipeAllowed && currentMenu != EditorMenu.Delete}
-                <!-- secret swipe toggle: faint on purpose, only exists for players with place timer 0 -->
-                <button
-                    class="swipe_toggle invis_button"
-                    class:on={swipeOn}
-                    title="Swipe"
-                    aria-label="Swipe to place many objects"
-                    aria-pressed={swipeOn}
-                    on:click={toggleSwipe}
-                >
-                    <svg viewBox="0 0 24 24" width="62%" height="62%" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M3 15c3-6 6 6 9 0s6 6 9 0" />
-                        <path d="M17 6l4 3-4 3" />
-                    </svg>
-                </button>
-            {/if}
             <div
                 class="side_panel menu_panel"
                 style={mobileScreen
@@ -1027,7 +1039,10 @@
 
             <div class="buttons_panel menu_panel">
                 {#if currentMenu == EditorMenu.Build}
-                    <div class="tabs">
+                    <div
+                        class="tabs"
+                        style="--tab-size: {tabSize}px; --tab-n: {categoryList.length}"
+                    >
                         {#each categoryList as objectTab}
                             <button
                                 class="obj_tab_button tab_button invis_button {currentObjectTab == objectTab ? 'active' : ''}"
@@ -1178,6 +1193,22 @@
                                             />
                                         </button>
                                     {/each}
+                                    {#if swipeAllowed}
+                                        <!-- secret swipe toggle: only exists for players with personal place timer 0 -->
+                                        <button
+                                            class="edit_button swipe_button invis_button wiggle_button"
+                                            class:on={swipeOn}
+                                            title="Swipe"
+                                            aria-label="Swipe to place many objects"
+                                            aria-pressed={swipeOn}
+                                            on:click={toggleSwipe}
+                                        >
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <path d="M2.5 15c3-6 6 6 9 0s6 6 9 0" />
+                                                <path d="M16.5 5.5l4.5 3.5-4.5 3.5" />
+                                            </svg>
+                                        </button>
+                                    {/if}
                                 </div>
                             {/if}
 
@@ -1269,7 +1300,7 @@
                                                             .objectPreview
                                                             ?.detailColor
                                                             .blending)
-                                                        ? "outline: 2px solid #09d6e5;filter: brightness(1.12);"
+                                                        ? "filter: brightness(1.15) drop-shadow(0 0 3px #09d6e5);"
                                                         : ""}
                                                     disabled={!getObjSettings(
                                                         pixiApp.editorNode
@@ -1566,12 +1597,12 @@
 
 <style>
     :root {
-        --menu-height: 360px;
+        --menu-height: calc(360px * var(--wscale, 1));
         --tray-rows: 2;
         --font-small: 24px;
         --font-medium: 32px;
         --font-large: 48px;
-        --side-panel-icon-size: 56px;
+        --side-panel-icon-size: calc(56px * var(--wscale, 1));
         --icon-padding: 15px;
         --grid-button-size: 92px;
         --grid-gap: 16px;
@@ -1591,7 +1622,7 @@
     /* tall desktop screens: three rows of objects */
     @media screen and (min-height: 960px) and (min-width: 900px) {
         :root {
-            --menu-height: 420px;
+            --menu-height: calc(420px * var(--wscale, 1));
             --tray-rows: 3;
         }
     }
@@ -1686,10 +1717,6 @@
             height: min(46vh, 430px) !important;
         }
 
-        /* the secret swipe toggle goes above the category tabs on phones (the tabs span the width) */
-        .swipe_toggle {
-            top: -84px !important;
-        }
 
         .side_panel {
             min-width: 80px !important;
@@ -1721,7 +1748,7 @@
 
     @media screen and (max-width: 600px) {
         :root {
-            --grid-button-size: 56px;
+            --grid-button-size: 48px;
             --font-medium: 18px;
         }
     }
@@ -2051,7 +2078,7 @@
 
     .tabs {
         grid-area: tabs;
-        height: 40px;
+        min-height: 40px;
         width: calc(100% - 32px);
         position: absolute;
         transform: translateY(-100%);
@@ -2133,9 +2160,11 @@
     }
     .tabs .obj_tab_button {
         flex: 0 0 auto;
-        /* exactly half of an object cell (cell = grid-button-size * 0.94), same size selected or not */
-        width: calc(var(--grid-button-size) * 0.94 / 2);
-        height: calc(var(--grid-button-size) * 0.94 / 2);
+        /* --tab-size comes from the script (bigger on wide screens); on narrow screens all the tabs shrink
+           together so the whole bar always fits the width. Same size selected or not. */
+        --fit: calc((100vw - var(--grid-gap) * 2 - 32px - var(--tab-n, 10) * 3px) / var(--tab-n, 10));
+        width: min(var(--tab-size, 40px), var(--fit));
+        height: min(var(--tab-size, 40px), var(--fit));
         /* no size change / transition between selected and unselected: nothing moves or bounces */
         transition: none;
         transform: none !important;
@@ -2152,8 +2181,8 @@
         margin-right: 0;
     }
     .tabs .obj_tab_button .obj_tab_icon {
-        width: 60%;
-        height: 60%;
+        width: 66%;
+        height: 66%;
         max-width: none;
         max-height: none;
         margin: 0;
@@ -2724,32 +2753,6 @@
         cursor: pointer;
     }
 
-    /* secret swipe toggle: sits just above the Place button, very faint until it is switched on */
-    .swipe_toggle {
-        position: absolute;
-        right: var(--grid-gap);
-        top: -46px;
-        width: 36px;
-        height: 36px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: white;
-        background: #000a;
-        border: 2px solid #ffffff55;
-        opacity: 0.3;
-        transition: opacity 0.15s, background-color 0.15s;
-        z-index: 3;
-    }
-    .swipe_toggle:hover {
-        opacity: 0.7;
-    }
-    .swipe_toggle.on {
-        opacity: 1;
-        background: #2f9a1f;
-        border-color: #c6f249;
-    }
 
     .color_icon {
         width: 85%;
@@ -2814,5 +2817,58 @@
         grid-column: 1 / -1;
         grid-row: 1 / -1;
         align-self: center;
+    }
+
+    /* ---- secret swipe button (Transform tab): same GD green button as the other edit buttons ---- */
+    .swipe_button {
+        color: white;
+    }
+    .swipe_button > svg {
+        width: 58%;
+        height: 58%;
+        display: block;
+        filter: drop-shadow(0 1px 1px #000);
+        pointer-events: none;
+    }
+    .swipe_button.on {
+        filter: brightness(1.18) drop-shadow(0 0 4px #c6f249);
+    }
+
+    /* ---- Main / Detail / B buttons of the Colors tab ----
+       Built from the 3 pieces cut out of GreenButton.png (green_l / green_m / green_r, the same ones GDButton
+       uses): the two ends keep their rounded shape and only the middle stretches, so nothing is squashed. */
+    .colors_tab_labels,
+    .blending_toggle {
+        border: 0 !important;
+        border-radius: 0 !important;
+        background: url("/ui/btn/green_m.png") center / 100% 100% no-repeat !important;
+        box-shadow: none !important;
+    }
+    .colors_tab_labels {
+        padding: 0 0.8em !important;
+    }
+    .colors_tab_labels::before,
+    .colors_tab_labels::after,
+    .blending_toggle::before,
+    .blending_toggle::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        height: 100%;
+        aspect-ratio: 28 / 80; /* the end pieces are 28x80 */
+        background-repeat: no-repeat;
+        background-size: 100% 100%;
+        pointer-events: none;
+        z-index: -1; /* behind the text, above the stretched middle */
+    }
+    .colors_tab_labels::before,
+    .blending_toggle::before {
+        left: 0;
+        background-image: url("/ui/btn/green_l.png");
+    }
+    .colors_tab_labels::after,
+    .blending_toggle::after {
+        right: 0;
+        background-image: url("/ui/btn/green_r.png");
     }
 </style>
